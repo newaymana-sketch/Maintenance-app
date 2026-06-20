@@ -271,8 +271,8 @@ let currentAccount = null;
 /* اسما الملفين على OneDrive — جذر المجلد (root). إن كانت الملفات داخل مجلد فرعي،
    يجب تعديل المسار هنا إلى مثلاً 'root:/مجلد الصيانة/mali_v4-5_updated.xlsx:' */
 const ONEDRIVE_FILES = {
-  mali: 'mali_v4-5_updated.xlsx',
-  fuji: 'fuji_v4-5_updated.xlsx',
+  mali: 'FUJI/mali_v4-5_updated.xlsx',
+  fuji: 'FUJI/fuji_v4-5_updated.xlsx',
 };
 
 async function initAuth(){
@@ -332,11 +332,16 @@ function onSyncIndicatorClick(){
    ========================================================= */
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0/me/drive/root:/';
 
+/* ترميز مسار يحتوي مجلدات فرعية بأمان: يُرمَّز كل جزء على حدة، وتبقى / حرفية بينها */
+function encodeGraphPath(path){
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
 async function graphGetTableRows(fileKey, tableName, columnName){
   const token = await getGraphToken();
   if(!token) return null;
   const fileName = ONEDRIVE_FILES[fileKey];
-  const url = `${GRAPH_BASE}${encodeURIComponent(fileName)}:/workbook/tables('${tableName}')/columns('${encodeURIComponent(columnName)}')/range`;
+  const url = `${GRAPH_BASE}${encodeGraphPath(fileName)}:/workbook/tables('${tableName}')/columns('${encodeURIComponent(columnName)}')/range`;
   const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
   if(!res.ok) throw new Error('فشل قراءة الجدول: '+res.status);
   const data = await res.json();
@@ -349,7 +354,7 @@ async function graphAddTableRow(fileKey, tableName, rowValues){
   const token = await getGraphToken();
   if(!token) throw new Error('لا يوجد رمز دخول صالح');
   const fileName = ONEDRIVE_FILES[fileKey];
-  const url = `${GRAPH_BASE}${encodeURIComponent(fileName)}:/workbook/tables('${tableName}')/rows/add`;
+  const url = `${GRAPH_BASE}${encodeGraphPath(fileName)}:/workbook/tables('${tableName}')/rows/add`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
