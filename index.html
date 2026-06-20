@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>سجل الصيانة</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<meta name="theme-color" content="#0B0F12">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
+<style>
+  :root{
+    --bg:#0B0F12;
+    --surface:#262D35;
+    --surface-2:#2E3640;
+    --ink:#FFFFFF;
+    --ink-dim:#A7AEB5;
+    --amber:#F4C430;
+    --amber-dim:#3a3320;
+    --green:#3DDC84;
+    --red:#FF5C5C;
+    --border:#4A535E;
+    /* أقصى تباين للبطاقات الرئيسية — للقراءة تحت ضوء الشمس المباشر */
+    --tile-bg:#FFFFFF;
+    --tile-ink:#0B0F12;
+    --tile-border:#0B0F12;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0; background:var(--bg); color:var(--ink);
+    font-family:'IBM Plex Sans Arabic', sans-serif; overscroll-behavior-y:none;
+    -webkit-font-smoothing:antialiased;}
+  body{ padding-bottom: 90px; }
+  button{font-family:inherit; cursor:pointer;}
+  input,select,textarea{font-family:inherit;}
+
+  /* ---------- Status bar (signature element) ---------- */
+  .statusbar{
+    position:sticky; top:0; z-index:50;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 16px; background:rgba(11,15,18,0.92); backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--border);
+  }
+  .statusbar .title{font-weight:700; font-size:15px; letter-spacing:.2px;}
+  .sync-pulse{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);}
+  .sync-dot{width:8px; height:8px; border-radius:50%; background:var(--amber); position:relative;}
+  .sync-dot.ok{background:var(--green);}
+  .sync-dot.pending{background:var(--amber); animation:pulse 1.4s ease-in-out infinite;}
+  .sync-dot.off{background:var(--ink-dim);}
+  @keyframes pulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(244,196,48,.5);}
+    50%{box-shadow:0 0 0 6px rgba(244,196,48,0);}
+  }
+
+  /* ---------- Layout ---------- */
+  .wrap{padding:16px; max-width:520px; margin:0 auto;}
+  .signin-banner{
+    background:var(--amber-dim); border:1px solid var(--amber); border-radius:12px;
+    padding:14px; margin-bottom:18px; display:flex; align-items:center; justify-content:space-between; gap:10px;
+  }
+  .signin-text{display:flex; flex-direction:column; gap:3px; flex:1;}
+  .signin-text b{font-size:13.5px; color:var(--amber);}
+  .signin-text span{font-size:11.5px; color:var(--ink-dim);}
+  .signin-btn{
+    background:var(--amber); color:#1A1500; border:none; border-radius:9px;
+    padding:9px 14px; font-weight:700; font-size:12.5px; white-space:nowrap;
+  }
+  .section-label{
+    font-size:12px; color:var(--ink-dim); font-weight:600; letter-spacing:.5px;
+    margin:22px 4px 10px; display:flex; align-items:center; gap:6px;
+  }
+  .section-label::after{content:""; flex:1; height:1px; background:var(--border);}
+
+  /* ---------- Fast action tiles ---------- */
+  /* أقصى تباين ممكن (أبيض/أسود) لقراءة واضحة تحت ضوء الشمس المباشر */
+  .tiles{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .tile{
+    background:var(--tile-bg); border:2px solid var(--tile-border); border-radius:14px;
+    padding:16px 12px; text-align:right; transition:transform .12s, opacity .12s;
+    display:flex; flex-direction:column; gap:8px; min-height:92px; position:relative; overflow:hidden;
+    box-shadow:0 2px 10px rgba(0,0,0,.35);
+  }
+  .tile:active{transform:scale(.96); opacity:.85;}
+  .tile .ic{font-size:24px;}
+  .tile .lbl{font-weight:800; font-size:15px; color:var(--tile-ink);}
+  .tile .stripe{position:absolute; right:0; top:0; bottom:0; width:6px;}
+
+  /* ---------- Recent log (ticket stubs) ---------- */
+  .ticket{
+    background:var(--tile-bg); border:2px dashed var(--tile-border); border-radius:10px;
+    padding:12px 14px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap:10px;
+  }
+  .ticket .meta{flex:1; min-width:0;}
+  .ticket .meta .top{font-size:13.5px; font-weight:800; color:var(--tile-ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .ticket .meta .sub{font-size:11.5px; color:#3A3F45; margin-top:2px; font-weight:600;}
+  .ticket .amt{font-weight:800; font-size:14px; color:var(--tile-ink); white-space:nowrap;}
+  .ticket .pill{
+    font-size:10px; padding:2px 7px; border-radius:20px; font-weight:700; white-space:nowrap;
+  }
+  .pill.synced{background:#E3F8EC; color:#15803D;}
+  .pill.pending{background:#FFF3D6; color:#92650A;}
+  .pill.failed{background:#FDE2E2; color:#B91C1C;}
+  .empty-state{
+    text-align:center; padding:30px 10px; color:var(--ink-dim); font-size:13px;
+    border:1px dashed var(--border); border-radius:12px;
+  }
+
+  /* ---------- Bottom sheet (form) ---------- */
+  .sheet-backdrop{
+    position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:90;
+    opacity:0; pointer-events:none; transition:opacity .2s;
+  }
+  .sheet-backdrop.open{opacity:1; pointer-events:auto;}
+  .sheet{
+    position:fixed; right:0; left:0; bottom:0; z-index:91;
+    background:var(--surface); border-radius:20px 20px 0 0;
+    border-top:1px solid var(--border);
+    max-height:88vh; overflow-y:auto;
+    transform:translateY(100%); transition:transform .25s cubic-bezier(.32,.72,0,1);
+    padding:14px 18px 24px;
+  }
+  .sheet.open{transform:translateY(0);}
+  .sheet-handle{width:38px; height:4px; background:var(--border); border-radius:4px; margin:0 auto 14px;}
+  .sheet-title{font-size:17px; font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:8px;}
+  .sheet-sub{font-size:12.5px; color:var(--ink-dim); margin-bottom:18px;}
+
+  .field{margin-bottom:14px;}
+  .field label{display:block; font-size:12.5px; color:var(--ink-dim); margin-bottom:6px; font-weight:600;}
+  .field input, .field select, .field textarea{
+    width:100%; background:var(--surface-2); border:1px solid var(--border); color:var(--ink);
+    border-radius:10px; padding:12px 14px; font-size:15px; outline:none;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{border-color:var(--amber);}
+  .field textarea{resize:none; min-height:64px;}
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .calc-line{
+    display:flex; justify-content:space-between; font-size:13px; padding:6px 0;
+    border-bottom:1px solid var(--border); color:var(--ink-dim);
+  }
+  .calc-line b{color:var(--ink); font-weight:600;}
+  .calc-line.total{border-bottom:none; padding-top:10px; font-size:15px;}
+  .calc-line.total b{color:var(--amber); font-size:17px;}
+
+  .submit-btn{
+    width:100%; padding:15px; border-radius:12px; border:none; background:var(--amber);
+    color:#1A1500; font-weight:700; font-size:15px; margin-top:8px;
+  }
+  .submit-btn:active{opacity:.85;}
+  .cancel-btn{
+    width:100%; padding:12px; border-radius:12px; border:1px solid var(--border); background:transparent;
+    color:var(--ink-dim); font-weight:600; font-size:13.5px; margin-top:8px;
+  }
+  .tab-btn{
+    flex:1; padding:11px 8px; border-radius:10px; border:1px solid var(--border); background:var(--surface-2);
+    color:var(--ink-dim); font-weight:700; font-size:13px;
+  }
+  .tab-btn.active{background:var(--amber); color:#1A1500; border-color:var(--amber);}
+
+  /* ---------- Custom dropdown (full contrast control) ---------- */
+  .dd{position:relative;}
+  .dd-trigger{
+    width:100%; background:var(--surface-2); border:1px solid var(--border); color:var(--ink);
+    border-radius:10px; padding:12px 14px; font-size:15px; text-align:right;
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+  }
+  .dd-trigger .arrow{color:var(--ink-dim); font-size:11px; transition:transform .15s;}
+  .dd-trigger.placeholder{color:var(--ink-dim);}
+  .dd.open .dd-trigger{border-color:var(--amber);}
+  .dd.open .dd-trigger .arrow{transform:rotate(180deg);}
+  .dd-panel{
+    display:none; position:absolute; top:calc(100% + 6px); right:0; left:0; z-index:40;
+    background:#15181B; border:1px solid var(--border); border-radius:12px;
+    max-height:280px; overflow-y:auto; box-shadow:0 12px 28px rgba(0,0,0,.5);
+  }
+  .dd.open .dd-panel{display:block;}
+  .dd-option{
+    padding:13px 16px; font-size:14.5px; color:var(--ink); cursor:pointer;
+    border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between;
+  }
+  .dd-option:last-child{border-bottom:none;}
+  .dd-option:active{background:var(--surface-2);}
+  .dd-option.selected{color:var(--amber); font-weight:600; background:rgba(244,196,48,.08);}
+  .dd-group-label{
+    padding:8px 16px; font-size:10.5px; color:var(--ink-dim); font-weight:700; letter-spacing:.5px;
+    background:#0F1215; position:sticky; top:0;
+  }
+
+  .toast{
+    position:fixed; bottom:100px; right:50%; transform:translateX(50%) translateY(20px);
+    background:var(--green); color:#08240F; font-weight:700; font-size:13.5px;
+    padding:12px 20px; border-radius:30px; z-index:99; opacity:0; transition:all .25s;
+    pointer-events:none; white-space:nowrap;
+  }
+  .toast.show{opacity:1; transform:translateX(50%) translateY(0);}
+  .toast.err{background:var(--red); color:#2A0707;}
+
+  ::selection{background:var(--amber); color:#000;}
+</style>
+</head>
+<body>
+
+  <div class="statusbar">
+    <div class="title">📋 سجل الصيانة</div>
+    <div class="sync-pulse" id="syncIndicator" onclick="onSyncIndicatorClick()">
+      <span class="sync-dot off" id="syncDot"></span>
+      <span id="syncText">محلي فقط</span>
+    </div>
+  </div>
+
+  <div class="wrap">
+
+    <div id="signinBanner" class="signin-banner" style="display:none;">
+      <div class="signin-text">
+        <b>سجّل دخولك بحساب Microsoft</b>
+        <span>لتعمل القوائم والمزامنة مباشرة من ملفاتك الحقيقية على OneDrive</span>
+      </div>
+      <button class="signin-btn" onclick="signIn()">تسجيل الدخول</button>
+    </div>
+
+
+    <div class="section-label">إجراءات سريعة</div>
+    <div class="tiles" id="tilesGrid"></div>
+
+    <div class="section-label">آخر العمليات</div>
+    <div id="recentList"></div>
+
+  </div>
+
+  <div class="sheet-backdrop" id="backdrop"></div>
+  <div class="sheet" id="sheet">
+    <div class="sheet-handle"></div>
+    <div id="sheetBody"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================
+   المصادقة — Microsoft Graph API عبر MSAL.js
+   حساب شخصي، صلاحية Files.ReadWrite فقط (الوصول لملفاتك في OneDrive)
+   ========================================================= */
+const MSAL_CONFIG = {
+  auth: {
+    clientId: '5f9ed429-26b7-4506-bfe6-4bebe20fb5fa',
+    authority: 'https://login.microsoftonline.com/consumers',
+    redirectUri: window.location.href.split('?')[0].split('#')[0],
+  },
+  cache: {
+    cacheLocation: 'localStorage', // يبقى تسجيل الدخول محفوظاً بين الجلسات
+  },
+};
+const GRAPH_SCOPES = ['Files.ReadWrite'];
+
+let msalInstance = null;
+let currentAccount = null;
+
+/* اسما الملفين على OneDrive — جذر المجلد (root). إن كانت الملفات داخل مجلد فرعي،
+   يجب تعديل المسار هنا إلى مثلاً 'root:/مجلد الصيانة/mali_v4-5_updated.xlsx:' */
+const ONEDRIVE_FILES = {
+  mali: 'mali_v4-5_updated.xlsx',
+  fuji: 'fuji_v4-5_updated.xlsx',
+};
+
+async function initAuth(){
+  msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
+  await msalInstance.initialize();
+  // معالجة العودة من صفحة تسجيل الدخول (إن وُجدت)
+  const response = await msalInstance.handleRedirectPromise();
+  if(response && response.account){
+    currentAccount = response.account;
+  } else {
+    const accounts = msalInstance.getAllAccounts();
+    if(accounts.length > 0) currentAccount = accounts[0];
+  }
+  updateAuthUI();
+}
+
+function signIn(){
+  msalInstance.loginRedirect({ scopes: GRAPH_SCOPES });
+}
+
+function signOut(){
+  msalInstance.logoutRedirect();
+}
+
+async function getGraphToken(){
+  if(!currentAccount) return null;
+  try{
+    const result = await msalInstance.acquireTokenSilent({
+      scopes: GRAPH_SCOPES,
+      account: currentAccount,
+    });
+    return result.accessToken;
+  } catch(e){
+    // الجلسة الصامتة فشلت (مثلاً انتهت صلاحية الجلسة) — يحتاج تسجيل دخول تفاعلي
+    console.error('فشل الحصول على رمز الدخول بصمت', e);
+    return null;
+  }
+}
+
+function updateAuthUI(){
+  const banner = document.getElementById('signinBanner');
+  if(currentAccount){
+    banner.style.display = 'none';
+  } else {
+    banner.style.display = 'flex';
+  }
+}
+
+function onSyncIndicatorClick(){
+  if(!currentAccount){
+    signIn();
+  }
+}
+
+/* =========================================================
+   طبقة الاتصال بـ Microsoft Graph — قراءة/كتابة جداول الإكسل
+   ========================================================= */
+const GRAPH_BASE = 'https://graph.microsoft.com/v1.0/me/drive/root:/';
+
+async function graphGetTableRows(fileKey, tableName, columnName){
+  const token = await getGraphToken();
+  if(!token) return null;
+  const fileName = ONEDRIVE_FILES[fileKey];
+  const url = `${GRAPH_BASE}${encodeURIComponent(fileName)}:/workbook/tables('${tableName}')/columns('${encodeURIComponent(columnName)}')/range`;
+  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+  if(!res.ok) throw new Error('فشل قراءة الجدول: '+res.status);
+  const data = await res.json();
+  // نستخدم "text" لا "values": القيم الخام تحوّل التواريخ لأرقام تسلسلية (مثل 44146 بدل التاريخ)
+  // الصف الأول هو رأس العمود، نتجاهله
+  return (data.text || []).slice(1).map(r=>r[0]).filter(v=>v !== '' && v !== null);
+}
+
+async function graphAddTableRow(fileKey, tableName, rowValues){
+  const token = await getGraphToken();
+  if(!token) throw new Error('لا يوجد رمز دخول صالح');
+  const fileName = ONEDRIVE_FILES[fileKey];
+  const url = `${GRAPH_BASE}${encodeURIComponent(fileName)}:/workbook/tables('${tableName}')/rows/add`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ values: [rowValues] }),
+  });
+  if(!res.ok){
+    const errText = await res.text();
+    throw new Error(`فشلت الكتابة (${res.status}): ${errText}`);
+  }
+  return await res.json();
+}
+
+/* =========================================================
+   البيانات الحيّة — تُقرأ من tblClients (fuji) و tblParties (mali)
+   عبر Graph API عند توفر تسجيل دخول واتصال، وتُخزَّن محلياً (cache)
+   لتعمل دون اتصال أيضاً. القيم أدناه هي نسخة احتياطية أولية فقط،
+   تُستبدل فوراً بالبيانات الحقيقية بعد أول تحميل ناجح.
+   ========================================================= */
+let CLIENTS_FUJI = ["شربين","المحلة","خليفة","الأطفال","بنها","مصنع الغزل","طنطا","الحامول","الزقازيق","شبراهور","السلاب","بورسعيد","بلطيم"];
+let OWNERS = ["عمر أبو العز","محسن"];
+let CLIENTS_BY_OWNER = {
+  "عمر أبو العز": ["الحج إبراهيم","صبح","الشريف","عويضة"],
+  "محسن": [],
+};
+let ALL_CLIENTS = Object.values(CLIENTS_BY_OWNER).flat();
+
+/* تحميل القوائم الحقيقية من الإكسل عبر Graph API، مع تخزين نسخة محلية للعمل دون اتصال */
+async function refreshLiveLists(){
+  if(!currentAccount) return; // غير مسجّل دخول — نبقى على آخر نسخة محلية معروفة
+  try{
+    const [fujiClients, partiesNames, partiesRoles, partiesLinks] = await Promise.all([
+      graphGetTableRows('fuji', 'tblClients', 'اسم العميل'),
+      graphGetTableRows('mali', 'tblParties', 'الاسم'),
+      graphGetTableRows('mali', 'tblParties', 'الدور'),
+      graphGetTableRows('mali', 'tblParties', 'مرتبط بـ (صاحب العمل)'),
+    ]);
+
+    if(fujiClients && fujiClients.length){
+      CLIENTS_FUJI = fujiClients;
+      localStorage.setItem('cache_clients_fuji', JSON.stringify(CLIENTS_FUJI));
+    }
+
+    if(partiesNames && partiesNames.length){
+      const owners = [];
+      const byOwner = {};
+      partiesNames.forEach((name, i)=>{
+        if(!name || name.startsWith('(أضف')) return; // تجاهل صفوف "أضف عميل" الفارغة
+        const role = (partiesRoles[i]||'').trim();
+        const linkedTo = (partiesLinks[i]||'').trim();
+        if(role.includes('صاحب عمل')){
+          owners.push(name);
+          if(!byOwner[name]) byOwner[name] = [];
+        } else {
+          if(linkedTo && linkedTo !== '—'){
+            if(!byOwner[linkedTo]) byOwner[linkedTo] = [];
+            byOwner[linkedTo].push(name);
+          }
+        }
+      });
+      OWNERS = owners;
+      CLIENTS_BY_OWNER = byOwner;
+      ALL_CLIENTS = Object.values(CLIENTS_BY_OWNER).flat();
+      localStorage.setItem('cache_owners', JSON.stringify(OWNERS));
+      localStorage.setItem('cache_clients_by_owner', JSON.stringify(CLIENTS_BY_OWNER));
+    }
+  } catch(e){
+    console.error('فشل تحميل القوائم الحية، نستخدم آخر نسخة محفوظة', e);
+  }
+}
+
+/* استرجاع آخر نسخة محلية محفوظة (للعمل دون اتصال فور فتح التطبيق) */
+function loadCachedLists(){
+  try{
+    const cf = localStorage.getItem('cache_clients_fuji');
+    if(cf) CLIENTS_FUJI = JSON.parse(cf);
+    const ow = localStorage.getItem('cache_owners');
+    if(ow) OWNERS = JSON.parse(ow);
+    const cbo = localStorage.getItem('cache_clients_by_owner');
+    if(cbo){ CLIENTS_BY_OWNER = JSON.parse(cbo); ALL_CLIENTS = Object.values(CLIENTS_BY_OWNER).flat(); }
+  } catch(e){ console.error('فشل تحميل النسخة المحلية المخزّنة', e); }
+}
+
+const STATUS_TYPES = ["يعمل","يحتاج قطعة","معلق","تحت الملاحظة"];
+/* ---- قطع غيار المكنة المعرّفة في tblParts (الأعمار الافتراضية بالكم/اليوم) ---- */
+const MOTO_PARTS = ["آلة الجر / سلسلة الدرايف","كاوتش خلفي","كاوتش أمامي","فلتر الهواء","تيل الفرامل الخلفي","تيل الفرامل الأمامي","بواجي الإشعال","حزام التوقيت / السير","مرشح الوقود","بطارية","زيت المحرك","سائل الفرامل"];
+
+/* ---- مصدر شراء القطعة (H140 في سجل تغييرات القطع) ---- */
+const PART_SOURCES = ["ورشة محلية","قطاعي","أونلاين","جملة","هدية","ضمان"];
+
+/* ---- نوع زيارة فوجي (AmalList الأصلية في tblFuji) ---- */
+const VISIT_TYPES = ["صيانة دورية","عطل طارئ","زيارة مشتركة","تسليم","مقابلة","متابعة"];
+
+/* ---- نوع العمل للعمليات المالية في tblSegel (AmalList) ---- */
+const WORK_TYPES_MALI = ["عطل خارجي","تركيب خارجي","صيانة دورية","استشارة فنية","متابعة/ضمان"];
+
+/* ---- أكواد الأعطال الفنية (B10 في fuji) ---- */
+/* ---- أكواد الأعطال الفعلية المرصودة في السجل (نادرة الحدوث، الغالب '-') ---- */
+const FAULT_CODES = ["-","E30","E32","err56","أخرى"];
+
+/* ---- الجزء المُستبدل: حقل نصي حر، هذه فقط اقتراحات شائعة من السجل الفعلي ---- */
+const REPLACED_PART_SUGGESTIONS = ["كونتاكتور","انكودر","فيوز","باور سبلاي","زر طلب","كارتة","مروحة","مقايسة","ليمت سويتش","مغناطيس","سلوك فرامل","ازرار","فوتوسيل","مغناطيس","استالس","انفرتر","خلية باب","ليدات","مفتاح تجريش"];
+
+/* ---- أرقام المصاعد (B7 في fuji) ---- */
+const ELEVATOR_NUMS = ["1","2","3","4","5","6"];
+
+/* ---- ساعات العمل (B15 في fuji) ---- */
+const WORK_HOURS = ["1","1.5","2","2.5","3","3.5","4","4.5","5","5.5","6","7","8","9","10"];
+
+/* ---- حالة التحصيل المالية (mali) ---- */
+const COLLECT_STATUS = ["محصّل","جزئي","معلق","لا ينطبق"];
+
+/* =========================================================
+   التصنيف المالي الكامل — 32 تصنيفاً، مطابقة حرفياً لـ TaslnefList
+   كل تصنيف يحدد "المحور" تلقائياً (نفس منطق صيغة B6 في إدخال سريع)
+   ========================================================= */
+const FINANCE_CATEGORIES = [
+  {cat:"💼 عطل — إيراد خارجي", axis:"👔 أعطال/تركيب", flow:"in"},
+  {cat:"💼 عطل — عمالة", axis:"👔 أعطال/تركيب", flow:"out"},
+  {cat:"💼 عطل — قطع غيار", axis:"👔 أعطال/تركيب", flow:"out"},
+  {cat:"💼 عطل — مواصلات", axis:"👔 أعطال/تركيب", flow:"out"},
+  {cat:"💼 عطل — إكرامية", axis:"👔 أعطال/تركيب", flow:"in"},
+  {cat:"🔧 تركيب — إيراد", axis:"👔 أعطال/تركيب", flow:"in"},
+  {cat:"🔧 تركيب — قطع وعمالة", axis:"👔 أعطال/تركيب", flow:"out"},
+  {cat:"🔧 تركيب — دفعة مقدمة", axis:"👔 أعطال/تركيب", flow:"in"},
+  {cat:"🔧 تركيب — دفعة نهائية", axis:"👔 أعطال/تركيب", flow:"in"},
+  {cat:"💰 راتب فوجي", axis:"💰 فوجي", flow:"out"},
+  {cat:"💰 صندوق فوجي (1000)", axis:"💰 فوجي", flow:"out"},
+  {cat:"🏍️ مكنة — إيراد أوبر", axis:"🏍️ مكنة", flow:"in"},
+  {cat:"🏍️ مكنة — إيراد ديدي", axis:"🏍️ مكنة", flow:"in"},
+  {cat:"🏍️ مكنة — إيراد إن درايفر", axis:"🏍️ مكنة", flow:"in"},
+  {cat:"🏍️ مكنة — وقود", axis:"🏍️ مكنة", flow:"out"},
+  {cat:"🏍️ مكنة — صيانة", axis:"🏍️ مكنة", flow:"out"},
+  {cat:"🏍️ مكنة — شراء زيت بالجملة", axis:"🏍️ مكنة", flow:"out"},
+  {cat:"🏍️ مكنة — استهلاك زيت", axis:"🏍️ مكنة", flow:"out"},
+  {cat:"🏍️ مكنة — متنوع", axis:"🏍️ مكنة", flow:"out"},
+  {cat:"🏦 صندوق — اقتطاع أعطال", axis:"🏦 صندوق 10%", flow:"out"},
+  {cat:"🏦 صندوق — اقتطاع فوجي", axis:"🏦 صندوق 10%", flow:"out"},
+  {cat:"🏦 صندوق — صرف", axis:"🏦 صندوق 10%", flow:"out"},
+  {cat:"🤝 دين لي", axis:"🤝 مديونيات", flow:"out"},
+  {cat:"🤝 سداد دين لي", axis:"🤝 مديونيات", flow:"in"},
+  {cat:"🤝 دين علي", axis:"🤝 مديونيات", flow:"in"},
+  {cat:"🤝 سداد دين علي", axis:"🤝 مديونيات", flow:"out"},
+  {cat:"🌱 مشروع — رأس مال", axis:"🌱 مشاريع", flow:"out"},
+  {cat:"🌱 مشروع — إيراد", axis:"🌱 مشاريع", flow:"in"},
+  {cat:"🌱 مشروع — مصروف", axis:"🌱 مشاريع", flow:"out"},
+  {cat:"🏠 مصروف ثابت", axis:"🏠 معيشة", flow:"out"},
+  {cat:"🛒 مصروف متغير", axis:"🏠 معيشة", flow:"out"},
+  {cat:"📦 متنوع", axis:"🏠 معيشة", flow:"out"},
+];
+
+// تصنيفات الأعطال/التركيب فقط (تحتاج حقل "نوع العمل")
+const BREAKDOWN_CATS = ["💼 عطل — إيراد خارجي","💼 عطل — عمالة","💼 عطل — قطع غيار","💼 عطل — مواصلات","💼 عطل — إكرامية","🔧 تركيب — إيراد","🔧 تركيب — قطع وعمالة","🔧 تركيب — دفعة مقدمة","🔧 تركيب — دفعة نهائية"];
+// تصنيفات المكنة المالية (تحتاج حقل "كيلومترات" فقط، لا تحتاج طرف)
+const MOTO_FINANCE_CATS = ["🏍️ مكنة — إيراد أوبر","🏍️ مكنة — إيراد ديدي","🏍️ مكنة — إيراد إن درايفر","🏍️ مكنة — وقود","🏍️ مكنة — صيانة","🏍️ مكنة — شراء زيت بالجملة","🏍️ مكنة — استهلاك زيت","🏍️ مكنة — متنوع"];
+
+function getCategoryInfo(cat){
+  return FINANCE_CATEGORIES.find(c=>c.cat===cat) || {axis:'', flow:'out'};
+}
+
+// أسعار افتراضية (تُقرأ من ⚙️ الإعدادات فعلياً عبر Graph API لاحقاً)
+const SETTINGS = {
+  travelCostPerKm: 3,     // الإعدادات!B21 في fuji
+  pctRate: 0.10,          // الإعدادات!B22 في mali
+  oilWholesalePrice: 130, // الإعدادات!B8 في mali — سعر لتر الزيت بالجملة
+};
+
+/* =========================================================
+   طبقة التخزين المحلي — IndexedDB
+   كل عملية تُكتب هنا فوراً وبشكل دائم، بمعزل عن نجاح المزامنة
+   ========================================================= */
+const DB_NAME = 'maintenance_log_db';
+const DB_VERSION = 1;
+let db;
+
+function openDB(){
+  return new Promise((resolve, reject)=>{
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e)=>{
+      const _db = e.target.result;
+      if(!_db.objectStoreNames.contains('entries')){
+        const store = _db.createObjectStore('entries', {keyPath:'id', autoIncrement:true});
+        store.createIndex('synced','synced');
+        store.createIndex('createdAt','createdAt');
+      }
+    };
+    req.onsuccess = (e)=>resolve(e.target.result);
+    req.onerror = (e)=>reject(e);
+  });
+}
+
+function addEntry(entry){
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction('entries','readwrite');
+    const store = tx.objectStore('entries');
+    entry.synced = false;
+    entry.createdAt = new Date().toISOString();
+    const req = store.add(entry);
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = (e)=>reject(e);
+  });
+}
+
+function getAllEntries(){
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction('entries','readonly');
+    const store = tx.objectStore('entries');
+    const req = store.getAll();
+    req.onsuccess = ()=>resolve(req.result.reverse());
+    req.onerror = (e)=>reject(e);
+  });
+}
+
+function countPending(){
+  return getAllEntries().then(rows=>rows.filter(r=>!r.synced).length);
+}
+
+function markEntrySynced(id){
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction('entries','readwrite');
+    const store = tx.objectStore('entries');
+    const req = store.get(id);
+    req.onsuccess = ()=>{
+      const entry = req.result;
+      if(!entry){ resolve(null); return; }
+      entry.synced = true;
+      entry.syncError = null;
+      const putReq = store.put(entry);
+      putReq.onsuccess = ()=>resolve(entry);
+      putReq.onerror = (e)=>reject(e);
+    };
+    req.onerror = (e)=>reject(e);
+  });
+}
+
+function markEntryFailed(id, errorMsg){
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction('entries','readwrite');
+    const store = tx.objectStore('entries');
+    const req = store.get(id);
+    req.onsuccess = ()=>{
+      const entry = req.result;
+      if(!entry){ resolve(null); return; }
+      entry.syncError = errorMsg;
+      const putReq = store.put(entry);
+      putReq.onsuccess = ()=>resolve(entry);
+      putReq.onerror = (e)=>reject(e);
+    };
+    req.onerror = (e)=>reject(e);
+  });
+}
+
+/* =========================================================
+   منطق الحساب — مطابق تماماً لصيغ الإكسل الفعلية
+   ========================================================= */
+function calcFuji(travelKm){
+  const km = parseFloat(travelKm)||0;
+  const cost = km>0 ? SETTINGS.travelCostPerKm : 0;
+  const total = km>0 ? cost*km : 0;
+  return {cost, total};
+}
+
+function calcBreakdown(income, parts, labor, party, eligible){
+  income = parseFloat(income)||0;
+  parts = parseFloat(parts)||0;
+  labor = parseFloat(labor)||0;
+  const net = income - parts - labor;
+  const liability = (eligible === 'نعم') ? net * SETTINGS.pctRate : 0;
+  const toYou = net - liability;
+  return {net, liability, toYou};
+}
+
+/* =========================================================
+   تعريف الإجراءات السريعة
+   ========================================================= */
+const ACTIONS = [
+  {id:'visit', ic:'🛠️', lbl:'زيارة صيانة', color:'#1A7F4E', file:'fuji', table:'tblFuji'},
+  {id:'finance', ic:'💼', lbl:'عملية مالية', color:'#B8860B', file:'mali', table:'tblSegel'},
+  {id:'moto', ic:'🏍️', lbl:'سجل المكنة', color:'#0B6FA8', file:'mali', table:'tblHistory'},
+];
+
+function renderTiles(){
+  const grid = document.getElementById('tilesGrid');
+  grid.innerHTML = ACTIONS.map(a=>`
+    <button class="tile" onclick="openForm('${a.id}')">
+      <span class="stripe" style="background:${a.color}"></span>
+      <span class="ic">${a.ic}</span>
+      <span class="lbl">${a.lbl}</span>
+    </button>
+  `).join('');
+}
+
+/* =========================================================
+   النماذج — كل واحد منها يكتب مباشرة في الجدول الأساسي
+   ========================================================= */
+function todayISO(){
+  const d = new Date();
+  return d.toISOString().slice(0,10);
+}
+
+function fieldOptions(arr){
+  return arr.map(v=>`<option value="${v}">${v}</option>`).join('');
+}
+
+/* =========================================================
+   مكوّن القائمة المنسدلة المخصصة — تباين عالٍ، تحكم كامل بالمظهر
+   ========================================================= */
+let ddCounter = 0;
+const ddState = {}; // id -> {value, options: [{value,label}] or grouped}
+
+function buildDropdown(id, options, placeholder, onChangeFn, groups=null){
+  ddState[id] = {value:'', onChangeFn};
+  let optionsHtml = '';
+  if(groups){
+    groups.forEach(g=>{
+      if(g.items.length === 0) return;
+      optionsHtml += `<div class="dd-group-label">${g.label}</div>`;
+      optionsHtml += g.items.map(v=>`<div class="dd-option" data-val="${v}" onclick="ddSelect('${id}','${v}')">${v}</div>`).join('');
+    });
+  } else {
+    optionsHtml = options.map(v=>`<div class="dd-option" data-val="${v}" onclick="ddSelect('${id}','${v}')">${v}</div>`).join('');
+  }
+  return `
+    <div class="dd" id="dd_${id}">
+      <button type="button" class="dd-trigger placeholder" id="dd_trigger_${id}" onclick="ddToggle('${id}')">
+        <span id="dd_label_${id}" data-placeholder="${placeholder}">${placeholder}</span>
+        <span class="arrow">▾</span>
+      </button>
+      <div class="dd-panel">${optionsHtml}</div>
+    </div>
+  `;
+}
+
+function ddToggle(id){
+  // اغلق كل القوائم الأخرى المفتوحة أولاً
+  document.querySelectorAll('.dd.open').forEach(el=>{
+    if(el.id !== 'dd_'+id) el.classList.remove('open');
+  });
+  document.getElementById('dd_'+id).classList.toggle('open');
+}
+
+function ddSelect(id, val){
+  ddState[id].value = val;
+  document.getElementById('dd_label_'+id).textContent = val;
+  document.getElementById('dd_trigger_'+id).classList.remove('placeholder');
+  document.getElementById('dd_'+id).classList.remove('open');
+  // تمييز الاختيار الحالي
+  document.querySelectorAll('#dd_'+id+' .dd-option').forEach(opt=>{
+    opt.classList.toggle('selected', opt.dataset.val === val);
+  });
+  if(ddState[id].onChangeFn) ddState[id].onChangeFn(val);
+}
+
+function ddValue(id){
+  return ddState[id] ? ddState[id].value : '';
+}
+
+function ddRebuild(id, options, groups=null){
+  // إعادة بناء الخيارات داخل لوحة موجودة (مثلاً عند تغيير صاحب العمل لتحديث قائمة العملاء)
+  const panel = document.querySelector('#dd_'+id+' .dd-panel');
+  if(!panel) return;
+  let optionsHtml = '';
+  if(groups){
+    groups.forEach(g=>{
+      if(g.items.length === 0) return;
+      optionsHtml += `<div class="dd-group-label">${g.label}</div>`;
+      optionsHtml += g.items.map(v=>`<div class="dd-option" data-val="${v}" onclick="ddSelect('${id}','${v}')">${v}</div>`).join('');
+    });
+  } else {
+    optionsHtml = options.map(v=>`<div class="dd-option" data-val="${v}" onclick="ddSelect('${id}','${v}')">${v}</div>`).join('');
+  }
+  panel.innerHTML = optionsHtml || `<div class="dd-option" style="color:var(--ink-dim)">لا يوجد عملاء مرتبطون بهذا الصاحب عمل</div>`;
+  ddState[id].value = '';
+  document.getElementById('dd_label_'+id).textContent = document.getElementById('dd_label_'+id).dataset.placeholder || '';
+  document.getElementById('dd_trigger_'+id).classList.add('placeholder');
+}
+
+// إغلاق أي قائمة مفتوحة عند الضغط خارجها
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('.dd')){
+    document.querySelectorAll('.dd.open').forEach(el=>el.classList.remove('open'));
+  }
+});
+
+function openForm(actionId){
+  const action = ACTIONS.find(a=>a.id===actionId);
+  let html = '';
+
+  if(actionId === 'visit'){
+    html = `
+      <div class="sheet-title">🛠️ زيارة صيانة — فوجي</div>
+      <div class="sheet-sub">يُكتب مباشرة في tblFuji</div>
+      <div class="field"><label>التاريخ</label><input type="date" id="f_date" value="${todayISO()}"></div>
+      <div class="field"><label>العميل</label>${buildDropdown('client', CLIENTS_FUJI, 'اختر العميل', onClientFujiChange)}</div>
+      <div class="field"><label>الموقع / المبنى</label><input type="text" id="f_location" placeholder="مثال: برج اللوجين، مستشفى المنال..."></div>
+      <div class="row2">
+        <div class="field"><label>رقم المصعد</label>${buildDropdown('elevnum', ELEVATOR_NUMS, '1')}</div>
+        <div class="field"><label>نوع الزيارة</label>${buildDropdown('visittype', VISIT_TYPES, 'اختر النوع')}</div>
+      </div>
+      <div class="field"><label>وصف العمل المنجز</label><textarea id="f_details" placeholder="اكتب ما قمت به..."></textarea></div>
+      <div class="row2">
+        <div class="field"><label>كود العطل</label>${buildDropdown('faultcode', FAULT_CODES, '-')}</div>
+        <div class="field">
+          <label>الجزء المُستبدل</label>
+          <input type="text" id="f_replacedpart" list="partsSuggestions" placeholder="اكتب أو اختر، أو اترك - إن لا ينطبق">
+          <datalist id="partsSuggestions">
+            ${REPLACED_PART_SUGGESTIONS.map(p=>`<option value="${p}">`).join('')}
+          </datalist>
+        </div>
+      </div>
+      <div class="field"><label>حالة المصعد</label>${buildDropdown('status', STATUS_TYPES, 'اختر الحالة')}</div>
+      <div class="row2">
+        <div class="field"><label>تم التحصيل؟</label>${buildDropdown('collected', ['نعم','لا','جزئي'], 'اختر')}</div>
+        <div class="field"><label>المبلغ المحصل (جنيه)</label><input type="number" id="f_collect" inputmode="decimal" placeholder="0"></div>
+      </div>
+      <div class="field"><label>ساعات العمل</label>${buildDropdown('workhours', WORK_HOURS, '3')}</div>
+      <div class="field">
+        <label>المسافة ذهاباً وإياباً (كم)</label>
+        <input type="number" id="f_km" inputmode="decimal" placeholder="0" oninput="updateVisitCalc()">
+        <div id="lastKmHint" style="font-size:11.5px; color:var(--ink-dim); margin-top:6px;"></div>
+      </div>
+      <div class="calc-line"><span>تكلفة التنقل المحسوبة</span><b id="calc_travelcost">0 جنيه</b></div>
+      <div class="field" style="margin-top:14px"><label>ملاحظات</label><textarea id="f_notes" placeholder="اختياري"></textarea></div>
+      <button class="submit-btn" onclick="submitVisit()">حفظ الزيارة</button>
+      <button class="cancel-btn" onclick="closeSheet()">إلغاء</button>
+    `;
+  }
+
+  if(actionId === 'finance'){
+    html = `
+      <div class="sheet-title">💼 عملية مالية</div>
+      <div class="sheet-sub">يُكتب مباشرة في tblSegel — السجل اليومي</div>
+      <div class="field"><label>التاريخ</label><input type="date" id="f_date" value="${todayISO()}"></div>
+      <div class="field"><label>التصنيف</label>${buildDropdown('fincat', FINANCE_CATEGORIES.map(c=>c.cat), 'اختر التصنيف', onFinCatChange)}</div>
+      <div class="field" id="axisDisplay" style="display:none;">
+        <label>المحور (يتحدد تلقائياً)</label>
+        <div style="background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:12px 14px; color:var(--ink-dim); font-size:14px;" id="axisText">—</div>
+      </div>
+
+      <div id="dynamicFields"></div>
+
+      <div class="field" style="margin-top:6px"><label>البيان</label><input type="text" id="f_desc" placeholder="وصف العملية..."></div>
+      <div class="field"><label>ملاحظات</label><textarea id="f_notes" placeholder="اختياري"></textarea></div>
+      <button class="submit-btn" onclick="submitFinance()">حفظ العملية</button>
+      <button class="cancel-btn" onclick="closeSheet()">إلغاء</button>
+    `;
+  }
+
+  if(actionId === 'moto'){
+    html = `
+      <div class="sheet-title">🏍️ سجل المكنة</div>
+      <div class="sheet-sub" id="motoSheetSub">يُكتب في سجل دفعات شراء الزيت بالجملة (ورقة محور المكنة)</div>
+      <div class="row2" style="margin-bottom:16px;">
+        <button type="button" class="tab-btn active" id="tabOilBtn" onclick="switchMotoTab('oil')">🛢️ شراء زيت بالجملة</button>
+        <button type="button" class="tab-btn" id="tabPartBtn" onclick="switchMotoTab('part')">🔧 تغيير قطعة</button>
+      </div>
+      <div id="motoTabBody"></div>
+      <button class="submit-btn" id="motoSubmitBtn" onclick="submitMotoOil()">حفظ دفعة الزيت</button>
+      <button class="cancel-btn" onclick="closeSheet()">إلغاء</button>
+    `;
+  }
+
+  document.getElementById('sheetBody').innerHTML = html;
+  document.getElementById('backdrop').classList.add('open');
+  document.getElementById('sheet').classList.add('open');
+
+  if(actionId === 'visit'){
+    updateLastKmHint();
+  }
+  if(actionId === 'moto'){
+    switchMotoTab('oil');
+  }
+}
+
+/* ---- تحديث تلميح "آخر مسافة لهذا العميل" (previous value suggestion) ---- */
+async function updateLastKmHint(){
+  const client = ddValue('client');
+  const hintEl = document.getElementById('lastKmHint');
+  if(!hintEl) return;
+  if(!client){ hintEl.textContent=''; return; }
+  const rows = await getAllEntries();
+  const last = rows.find(r=>r.type==='visit' && r.client===client);
+  hintEl.textContent = last ? `آخر مسافة مسجّلة لـ ${client}: ${last.km} كم` : `لا توجد زيارات سابقة مسجّلة لـ ${client}`;
+}
+function onClientFujiChange(){ updateLastKmHint(); }
+
+function closeSheet(){
+  document.getElementById('backdrop').classList.remove('open');
+  document.getElementById('sheet').classList.remove('open');
+  Object.keys(ddState).forEach(k=>delete ddState[k]);
+}
+document.getElementById('backdrop').addEventListener('click', closeSheet);
+
+/* ---- ربط ديناميكي: تغيير صاحب العمل يحدّث قائمة العملاء ---- */
+function onOwnerChange(ownerVal){
+  const clients = ownerVal ? (CLIENTS_BY_OWNER[ownerVal] || []) : ALL_CLIENTS;
+  ddRebuild('client2', clients);
+  updateBreakdownCalc();
+}
+
+/* =========================================================
+   منطق إظهار الحقول الديناميكي للعملية المالية
+   يحاكي صيغة B6 (المحور) + إظهار/إخفاء الحقول حسب التصنيف
+   ========================================================= */
+function onFinCatChange(cat){
+  const info = getCategoryInfo(cat);
+  document.getElementById('axisDisplay').style.display = 'block';
+  document.getElementById('axisText').textContent = info.axis;
+
+  const container = document.getElementById('dynamicFields');
+  let html = '';
+
+  if(BREAKDOWN_CATS.includes(cat)){
+    // عطل/تركيب — يحتاج صاحب عمل + عميل + نوع عمل + تفاصيل مالية + تحصيل
+    html += `<div class="field"><label>نوع العمل</label>${buildDropdown('worktype2', WORK_TYPES_MALI, 'اختر نوع العمل')}</div>`;
+    html += `<div class="field"><label>صاحب العمل (إن وُجد وسيط)</label>${buildDropdown('owner', OWNERS, 'بدون صاحب عمل وسيط', onOwnerChange)}</div>`;
+    html += `<div class="field"><label>العميل النهائي</label>${buildDropdown('client2', ALL_CLIENTS, 'اختر العميل')}</div>`;
+    if(info.flow === 'in'){
+      html += `<div class="field"><label>المبلغ (داخل) — جنيه</label><input type="number" id="f_income" inputmode="decimal" placeholder="0" oninput="updateBreakdownCalc()"></div>`;
+      html += `<div class="row2">
+        <div class="field"><label>قطع غيار (جنيه)</label><input type="number" id="f_parts" inputmode="decimal" placeholder="0" oninput="updateBreakdownCalc()"></div>
+        <div class="field"><label>عمالة مباشرة (جنيه)</label><input type="number" id="f_labor" inputmode="decimal" placeholder="0" oninput="updateBreakdownCalc()"></div>
+      </div>`;
+      html += `<div class="calc-line"><span>الصافي</span><b id="calc_net">0</b></div>`;
+      html += `<div class="calc-line"><span>نسبة 10% (إن وُجدت)</span><b id="calc_liab">0</b></div>`;
+      html += `<div class="calc-line total"><span>يدخل جيبك</span><b id="calc_toyou">0</b></div>`;
+    } else {
+      html += `<div class="field"><label>المبلغ (خارج) — جنيه</label><input type="number" id="f_outAmount" inputmode="decimal" placeholder="0"></div>`;
+    }
+    html += `<div class="field"><label>حالة التحصيل</label>${buildDropdown('collectStatus', COLLECT_STATUS, 'اختر الحالة')}</div>`;
+  } else if(MOTO_FINANCE_CATS.includes(cat)){
+    // عمليات مالية متعلقة بالمكنة — تحتاج فقط مبلغ + كيلومترات اختيارية
+    html += `<div class="field"><label>المبلغ (${info.flow==='in'?'داخل — إيراد':'خارج — مصروف'}) جنيه</label><input type="number" id="f_amount" inputmode="decimal" placeholder="0"></div>`;
+    html += `<div class="field"><label>كيلومترات (إن أمكن تحديدها)</label><input type="number" id="f_km2" inputmode="decimal" placeholder="اختياري"></div>`;
+  } else {
+    // كل باقي التصنيفات (فوجي، صندوق 10%، مديونيات، مشاريع، معيشة) — حقل مبلغ موحّد + طرف اختياري
+    html += `<div class="field"><label>المبلغ (${info.flow==='in'?'داخل — إيراد':'خارج — مصروف'}) جنيه</label><input type="number" id="f_amount" inputmode="decimal" placeholder="0"></div>`;
+    html += `<div class="field"><label>الطرف (اختياري)</label>${buildDropdown('partyGeneric', [...OWNERS, ...ALL_CLIENTS], 'لا ينطبق')}</div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+/* ---- حسابات لحظية تظهر أثناء الكتابة ---- */
+function updateVisitCalc(){
+  const km = document.getElementById('f_km').value;
+  const {total} = calcFuji(km);
+  document.getElementById('calc_travelcost').textContent = total.toFixed(0)+' جنيه';
+}
+
+function updateBreakdownCalc(){
+  const incomeEl = document.getElementById('f_income');
+  if(!incomeEl) return; // الحقول غير موجودة (تصنيف خارج لا داخل، مثلاً)
+  const income = incomeEl.value;
+  const parts = document.getElementById('f_parts').value;
+  const labor = document.getElementById('f_labor').value;
+  const owner = ddValue('owner');
+  // ملاحظة: الأهلية تُقرأ من tblParties فعلياً عبر Graph API لاحقاً.
+  // افتراضياً "نعم" إلى أن يتم الربط الحقيقي.
+  const eligible = 'نعم';
+  const {net, liability, toYou} = calcBreakdown(income, parts, labor, owner, eligible);
+  document.getElementById('calc_net').textContent = net.toFixed(0);
+  document.getElementById('calc_liab').textContent = liability.toFixed(0);
+  document.getElementById('calc_toyou').textContent = toYou.toFixed(0);
+}
+
+/* =========================================================
+   منطق بطاقة المكنة — فرعان حقيقيان: شراء زيت بالجملة / تغيير قطعة
+   ========================================================= */
+function switchMotoTab(tab){
+  document.getElementById('tabOilBtn').classList.toggle('active', tab==='oil');
+  document.getElementById('tabPartBtn').classList.toggle('active', tab==='part');
+  document.getElementById('motoSheetSub').textContent = tab==='oil'
+    ? 'يُكتب في سجل دفعات شراء الزيت بالجملة (ورقة محور المكنة)'
+    : 'يُكتب مباشرة في tblHistory — سجل تغييرات قطع الغيار';
+  const body = document.getElementById('motoTabBody');
+  const submitBtn = document.getElementById('motoSubmitBtn');
+
+  if(tab === 'oil'){
+    body.innerHTML = `
+      <div class="field"><label>التاريخ</label><input type="date" id="f_date" value="${todayISO()}"></div>
+      <div class="row2">
+        <div class="field"><label>الكمية (لتر)</label><input type="number" id="f_oilqty" inputmode="decimal" placeholder="0" oninput="updateOilCalc()"></div>
+        <div class="field"><label>سعر اللتر (جملة)</label><input type="number" id="f_oilprice" inputmode="decimal" placeholder="${SETTINGS.oilWholesalePrice}" value="${SETTINGS.oilWholesalePrice}" oninput="updateOilCalc()"></div>
+      </div>
+      <div class="calc-line total"><span>إجمالي التكلفة</span><b id="calc_oiltotal">0 جنيه</b></div>
+      <div class="field" style="margin-top:14px"><label>ملاحظات</label><textarea id="f_notes" placeholder="اختياري"></textarea></div>
+    `;
+    submitBtn.textContent = 'حفظ دفعة الزيت';
+    submitBtn.onclick = submitMotoOil;
+    updateOilCalc();
+  } else {
+    body.innerHTML = `
+      <div class="field"><label>التاريخ</label><input type="date" id="f_date" value="${todayISO()}"></div>
+      <div class="field"><label>القطعة</label>${buildDropdown('partname', MOTO_PARTS, 'اختر القطعة')}</div>
+      <div class="row2">
+        <div class="field"><label>كم عند الخلع</label><input type="number" id="f_kmremoved" inputmode="decimal" placeholder="0"></div>
+        <div class="field"><label>كم عند التركيب الجديد</label><input type="number" id="f_kminstalled" inputmode="decimal" placeholder="0"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>التكلفة (جنيه)</label><input type="number" id="f_partcost" inputmode="decimal" placeholder="0"></div>
+        <div class="field"><label>مصدر الشراء</label>${buildDropdown('partsource', PART_SOURCES, 'اختر المصدر')}</div>
+      </div>
+      <div class="field" style="margin-top:14px"><label>ملاحظات</label><textarea id="f_notes" placeholder="اختياري"></textarea></div>
+    `;
+    submitBtn.textContent = 'حفظ تغيير القطعة';
+    submitBtn.onclick = submitMotoPart;
+  }
+}
+
+function updateOilCalc(){
+  const qty = parseFloat(document.getElementById('f_oilqty').value)||0;
+  const price = parseFloat(document.getElementById('f_oilprice').value)||0;
+  document.getElementById('calc_oiltotal').textContent = (qty*price).toFixed(0)+' جنيه';
+}
+
+/* =========================================================
+   الحفظ — يكتب محلياً فوراً، ثم يحاول المزامنة (هيكل جاهز)
+   ========================================================= */
+async function saveAndSync(entry){
+  await addEntry(entry);
+  showToast('تم الحفظ محلياً ✓');
+  closeSheet();
+  refreshRecent();
+  refreshSyncStatus();
+  attemptSync(); // محاولة مزامنة فورية (لا تحجب الحفظ المحلي إن فشلت)
+}
+
+function submitVisit(){
+  const client = ddValue('client');
+  const visitType = ddValue('visittype');
+  const status = ddValue('status');
+  const elevNum = ddValue('elevnum') || '1';
+  const faultCode = ddValue('faultcode') || '-';
+  const replacedPart = document.getElementById('f_replacedpart').value.trim() || '-';
+  const location = document.getElementById('f_location').value.trim();
+  const collected = ddValue('collected');
+  const workHours = ddValue('workhours') || '3';
+  if(!client){ showToast('من فضلك اختر العميل', true); return; }
+  if(!document.getElementById('f_details').value.trim()){ showToast('من فضلك اكتب وصف العمل المنجز', true); return; }
+  const km = document.getElementById('f_km').value;
+  const {total} = calcFuji(km);
+  const entry = {
+    type:'visit', file:'fuji', table:'tblFuji',
+    date: document.getElementById('f_date').value,
+    client, location, elevNum, visitType, status, faultCode, replacedPart, collected, workHours,
+    details: document.getElementById('f_details').value,
+    km: parseFloat(km)||0,
+    travelCost: total,
+    collect: parseFloat(document.getElementById('f_collect').value)||0,
+    notes: document.getElementById('f_notes').value,
+    label: client + ' (مصعد ' + elevNum + ') — ' + (visitType||''),
+    amount: parseFloat(document.getElementById('f_collect').value)||0,
+  };
+  saveAndSync(entry);
+}
+
+/* ---- حفظ العملية المالية الموحّدة — يبني الصف وفق التصنيف المختار، مطابقاً لصف الترحيل الأصلي ---- */
+function submitFinance(){
+  const cat = ddValue('fincat');
+  if(!cat){ showToast('من فضلك اختر التصنيف', true); return; }
+  const info = getCategoryInfo(cat);
+  const date = document.getElementById('f_date').value;
+  const desc = document.getElementById('f_desc').value;
+  const notes = document.getElementById('f_notes').value;
+
+  let entry = {
+    type:'finance', file:'mali', table:'tblSegel',
+    date, cat, axis: info.axis, desc, notes,
+  };
+
+  if(BREAKDOWN_CATS.includes(cat)){
+    const owner = ddValue('owner');
+    const client = ddValue('client2');
+    const workType = ddValue('worktype2');
+    const collectStatus = ddValue('collectStatus');
+    if(!client){ showToast('من فضلك اختر العميل النهائي', true); return; }
+    const partyLabel = owner ? `${owner} ← ${client}` : client;
+    if(info.flow === 'in'){
+      const income = document.getElementById('f_income').value;
+      const parts = document.getElementById('f_parts').value;
+      const labor = document.getElementById('f_labor').value;
+      const {net, liability, toYou} = calcBreakdown(income, parts, labor, owner, 'نعم');
+      entry = {...entry, owner, client, party:partyLabel, workType, collectStatus,
+        income: parseFloat(income)||0, parts: parseFloat(parts)||0, labor: parseFloat(labor)||0,
+        net, liability, toYou, amount: parseFloat(income)||0,
+        label: cat+' — '+partyLabel};
+    } else {
+      const outAmount = parseFloat(document.getElementById('f_outAmount').value)||0;
+      entry = {...entry, owner, client, party:partyLabel, workType, collectStatus,
+        outAmount, amount: outAmount, label: cat+' — '+partyLabel};
+    }
+  } else if(MOTO_FINANCE_CATS.includes(cat)){
+    const amount = parseFloat(document.getElementById('f_amount').value)||0;
+    const km2 = parseFloat(document.getElementById('f_km2').value)||0;
+    entry = {...entry, amount, km:km2, label: cat};
+  } else {
+    const amount = parseFloat(document.getElementById('f_amount').value)||0;
+    const party = ddValue('partyGeneric');
+    entry = {...entry, amount, party, label: party ? `${cat} — ${party}` : cat};
+  }
+
+  saveAndSync(entry);
+}
+
+function submitMotoOil(){
+  const qty = parseFloat(document.getElementById('f_oilqty').value)||0;
+  const price = parseFloat(document.getElementById('f_oilprice').value)||0;
+  if(qty <= 0){ showToast('من فضلك أدخل الكمية بالتر', true); return; }
+  const total = qty*price;
+  const entry = {
+    type:'moto_oil', file:'mali', table:'tblHistory', sheetSection:'oil_purchases',
+    date: document.getElementById('f_date').value,
+    qty, price, total,
+    notes: document.getElementById('f_notes').value,
+    label: `شراء زيت بالجملة — ${qty} لتر`,
+    amount: total,
+  };
+  saveAndSync(entry);
+}
+
+function submitMotoPart(){
+  const partName = ddValue('partname');
+  const source = ddValue('partsource');
+  if(!partName){ showToast('من فضلك اختر القطعة', true); return; }
+  const kmRemoved = parseFloat(document.getElementById('f_kmremoved').value)||0;
+  const kmInstalled = parseFloat(document.getElementById('f_kminstalled').value)||0;
+  const cost = parseFloat(document.getElementById('f_partcost').value)||0;
+  const entry = {
+    type:'moto_part', file:'mali', table:'tblHistory', sheetSection:'part_changes',
+    date: document.getElementById('f_date').value,
+    partName, source, kmRemoved, kmInstalled, cost,
+    notes: document.getElementById('f_notes').value,
+    label: `تغيير قطعة — ${partName}`,
+    amount: cost,
+  };
+  saveAndSync(entry);
+}
+
+/* =========================================================
+   عرض السجل الأخير
+   ========================================================= */
+async function refreshRecent(){
+  const rows = await getAllEntries();
+  const list = document.getElementById('recentList');
+  if(rows.length === 0){
+    list.innerHTML = `<div class="empty-state">لا توجد عمليات مسجلة بعد<br>ابدأ بإضافة أول عملية من الأعلى</div>`;
+    return;
+  }
+  list.innerHTML = rows.slice(0,25).map(r=>{
+    const d = new Date(r.createdAt);
+    const dateStr = d.toLocaleDateString('ar-EG', {day:'numeric', month:'short'});
+    const timeStr = d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'});
+    let pillClass = r.synced ? 'synced' : 'pending';
+    let pillText = r.synced ? 'متزامن' : 'محلي';
+    if(!r.synced && r.syncError){ pillClass = 'failed'; pillText = 'فشلت المزامنة'; }
+    return `
+      <div class="ticket">
+        <div class="meta">
+          <div class="top">${r.label||r.type}</div>
+          <div class="sub">${dateStr} · ${timeStr}</div>
+        </div>
+        <div class="amt">${(r.amount||0).toFixed(0)} ج</div>
+        <div class="pill ${pillClass}">${pillText}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+/* =========================================================
+   حالة المزامنة — هيكل جاهز لربط Microsoft Graph API
+   حالياً: لا يوجد اتصال فعلي. كل العمليات تبقى "محلي" بأمان.
+   عند تفعيل الربط، attemptSync() سترفع المعلّقات للـ OneDrive.
+   ========================================================= */
+let isOnline = navigator.onLine;
+window.addEventListener('online', ()=>{isOnline=true; refreshSyncStatus(); attemptSync();});
+window.addEventListener('offline', ()=>{isOnline=false; refreshSyncStatus();});
+
+async function refreshSyncStatus(){
+  const pending = await countPending();
+  const dot = document.getElementById('syncDot');
+  const txt = document.getElementById('syncText');
+  if(pending === 0){
+    dot.className = 'sync-dot off';
+    txt.textContent = isOnline ? 'محفوظ محلياً' : 'بدون اتصال';
+  } else {
+    dot.className = 'sync-dot pending';
+    txt.textContent = `${pending} عملية بانتظار الرفع`;
+  }
+}
+
+/* =========================================================
+   تحويل كل نوع إدخال إلى صف بترتيب الأعمدة الصحيح في جدول الإكسل
+   null = اترك الخلية فارغة لتحسبها صيغة الإكسل تلقائياً
+   ========================================================= */
+function buildRowForEntry(entry){
+  if(entry.type === 'visit'){
+    // tblFuji: م،التاريخ،العميل،الموقع،رقم المصعد،الشهر،السنة،نوع الزيارة،وصف العمل،كود العطل،الجزء المستبدل،حالة المصعد،تم التحصيل،المبلغ المحصل،ساعات العمل،المسافة،سعر الكم،تكلفة التنقل،ملاحظات
+    return {
+      table: 'tblFuji', file: 'fuji',
+      values: [null, entry.date, entry.client, entry.location||'', entry.elevNum, null, null,
+        entry.visitType, entry.details, entry.faultCode, entry.replacedPart, entry.status,
+        entry.collected, entry.collect, entry.workHours, entry.km, null, null, entry.notes||''],
+    };
+  }
+  if(entry.type === 'finance'){
+    // tblSegel: م،التاريخ،التصنيف،المحور،داخل،خارج،الرصيد،نوع العمل،صاحب العمل/عميل،البيان،حالة التحصيل،ملاحظات
+    const isIn = getCategoryInfo(entry.cat).flow === 'in';
+    const partyField = entry.party || entry.client || '';
+    let amountIn = null, amountOut = null;
+    if(BREAKDOWN_CATS.includes(entry.cat)){
+      amountIn = isIn ? entry.income : null;
+      amountOut = isIn ? null : entry.outAmount;
+    } else {
+      amountIn = isIn ? entry.amount : null;
+      amountOut = isIn ? null : entry.amount;
+    }
+    return {
+      table: 'tblSegel', file: 'mali',
+      values: [null, entry.date, entry.cat, null, amountIn, amountOut, null,
+        entry.workType||'', partyField, entry.desc||'', entry.collectStatus||'', entry.notes||''],
+    };
+  }
+  if(entry.type === 'moto_part'){
+    // tblHistory: م،تاريخ التغيير،اسم القطعة،كم عند الخلع،كم عند التركيب،العمر الفعلي،التكلفة،مصدر الشراء،ملاحظات
+    return {
+      table: 'tblHistory', file: 'mali',
+      values: [null, entry.date, entry.partName, entry.kmRemoved, entry.kmInstalled, null,
+        entry.cost, entry.source||'', entry.notes||''],
+    };
+  }
+  if(entry.type === 'moto_oil'){
+    // سجل شراء الزيت بالجملة ليس Excel Table مُسمّى — نطرحه كصف مالي ضمن tblSegel بتصنيف مخصص
+    return {
+      table: 'tblSegel', file: 'mali',
+      values: [null, entry.date, '🏍️ مكنة — شراء زيت بالجملة', null, null, entry.total, null,
+        '', '', `${entry.qty} لتر × ${entry.price} جنيه`, '', entry.notes||''],
+    };
+  }
+  return null;
+}
+
+/* =========================================================
+   محاولة المزامنة الفعلية — رفع كل العمليات المعلّقة للإكسل الحقيقي
+   تسلسلية (لا متزامنة) لتجنب تعارض جلسات الكتابة على نفس الملف
+   ========================================================= */
+let syncInProgress = false;
+
+async function attemptSync(){
+  if(syncInProgress) return; // لا تبدأ مزامنة جديدة فوق أخرى جارية
+  if(!currentAccount || !isOnline) { refreshSyncStatus(); return; }
+
+  syncInProgress = true;
+  try{
+    const rows = await getAllEntries();
+    const pending = rows.filter(r=>!r.synced);
+    for(const entry of pending){
+      const rowSpec = buildRowForEntry(entry);
+      if(!rowSpec) continue;
+      try{
+        await graphAddTableRow(rowSpec.file, rowSpec.table, rowSpec.values);
+        await markEntrySynced(entry.id);
+      } catch(err){
+        console.error('فشلت مزامنة عملية:', entry.id, err);
+        await markEntryFailed(entry.id, err.message || 'خطأ غير معروف');
+        // نوقف المحاولات هنا لهذه الجلسة (مثلاً انتهت الجلسة) ونكمل لاحقاً
+        break;
+      }
+    }
+  } finally {
+    syncInProgress = false;
+    refreshSyncStatus();
+    refreshRecent();
+  }
+}
+
+
+/* =========================================================
+   تشغيل
+   ========================================================= */
+function showToast(msg, isErr=false){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr?' err':'');
+  setTimeout(()=>{t.className='toast'+(isErr?' err':'');}, 2200);
+}
+
+async function init(){
+  loadCachedLists();      // أولاً: عرض فوري من آخر نسخة محلية معروفة (يعمل حتى دون اتصال)
+  db = await openDB();
+  renderTiles();
+  await refreshRecent();
+  await initAuth();        // تهيئة تسجيل الدخول، يكتشف إن كنت مسجّلاً مسبقاً
+  await refreshSyncStatus();
+  if(currentAccount){
+    await refreshLiveLists(); // محاولة تحديث القوائم من الإكسل الحقيقي فوراً
+    attemptSync();             // محاولة رفع أي عمليات معلّقة من جلسات سابقة
+  }
+}
+init();
+</script>
+</body>
+</html>
