@@ -1,0 +1,12 @@
+{
+  "name": "سجل الصيانة",
+  "short_name": "الصيانة",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0B0F12",
+  "theme_color": "#0B0F12",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" }
+  ]
+}
